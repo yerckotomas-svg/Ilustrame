@@ -332,20 +332,29 @@ function Dashboard({ ventas, pedidos, stock, gastos, clientes, cotizaciones }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // VENTAS
 // ══════════════════════════════════════════════════════════════════════════════
+const FORM_VENTA_EMPTY = { cliente:"", clienteLibre:"", usarNombreLibre:false, detalle:"", monto:"", fecha:today(), metodo:"Transferencia" };
 function Ventas({ ventas, setVentas, clientes }) {
   const [drawer, setDrawer] = useState(false);
+  const [editItem, setEditItem] = useState(null);
   const [search, setSearch] = useState("");
-  const [form, setForm] = useState({ cliente:"", detalle:"", monto:"", fecha:today(), metodo:"Transferencia" });
+  const [form, setForm] = useState(FORM_VENTA_EMPTY);
 
   const filtered = ventas.filter(v => v.cliente.toLowerCase().includes(search.toLowerCase()) || v.detalle.toLowerCase().includes(search.toLowerCase()));
   const total = filtered.reduce((s,v)=>s+v.monto,0);
 
+  const openNew = () => { setEditItem(null); setForm(FORM_VENTA_EMPTY); setDrawer(true); };
+  const openEdit = (v) => { setEditItem(v); setForm({ ...v, clienteLibre:"", usarNombreLibre:false }); setDrawer(true); };
+
   const guardar = () => {
-    if (!form.cliente||!form.monto) return;
-    setVentas([{ ...form, id:Date.now(), monto:Number(form.monto) }, ...ventas]);
-    setForm({ cliente:"", detalle:"", monto:"", fecha:today(), metodo:"Transferencia" });
+    const nombreFinal = form.usarNombreLibre ? form.clienteLibre : form.cliente;
+    if (!nombreFinal || !form.monto) return;
+    const item = { ...form, cliente: nombreFinal, monto: Number(form.monto) };
+    delete item.clienteLibre; delete item.usarNombreLibre;
+    if (editItem) setVentas(ventas.map(v => v.id===editItem.id ? {...item, id:editItem.id} : v));
+    else setVentas([{ ...item, id:Date.now() }, ...ventas]);
     setDrawer(false);
   };
+  const eliminar = (id) => { if(confirm("¿Eliminar esta venta?")) setVentas(ventas.filter(v=>v.id!==id)); };
 
   return (
     <div>
@@ -387,26 +396,40 @@ function Ventas({ ventas, setVentas, clientes }) {
               <div className="li-right">
                 <div className="li-amount green">{formatCLP(v.monto)}</div>
                 <div className="li-date">{v.fecha}</div>
+                <div style={{display:"flex",gap:4,marginTop:4,justifyContent:"flex-end"}}>
+                  <button className="btn btn-sm btn-ghost" style={{padding:"3px 8px",fontSize:"0.7rem"}} onClick={()=>openEdit(v)}>✏️</button>
+                  <button className="btn btn-sm" style={{background:"rgba(255,92,58,0.1)",color:"var(--red)",border:"none",cursor:"pointer",borderRadius:6,padding:"3px 8px",fontSize:"0.7rem"}} onClick={()=>eliminar(v.id)}>✕</button>
+                </div>
               </div>
             </div>
           ))
         }
       </div>
 
-      <button className="fab" onClick={()=>setDrawer(true)}>＋</button>
+      <button className="fab" onClick={openNew}>＋</button>
 
       {drawer && (
         <div className="overlay" onClick={e=>e.target===e.currentTarget&&setDrawer(false)}>
           <div className="drawer">
             <div className="drawer-handle"/>
-            <div className="drawer-title">Nueva venta</div>
+            <div className="drawer-title">{editItem ? "Editar venta" : "Nueva venta"}</div>
             <div className="form-group">
               <label className="form-label">Cliente</label>
-              <select className="form-select" value={form.cliente} onChange={e=>setForm({...form,cliente:e.target.value})}>
-                <option value="">Seleccionar...</option>
-                {clientes.map(c=><option key={c.id}>{c.nombre}</option>)}
-                <option value="Otro">Otro / sin registrar</option>
-              </select>
+              {!form.usarNombreLibre ? (
+                <select className="form-select" value={form.cliente} onChange={e=>{
+                  if(e.target.value==="__libre") setForm({...form,usarNombreLibre:true,cliente:""});
+                  else setForm({...form,cliente:e.target.value});
+                }}>
+                  <option value="">Seleccionar...</option>
+                  {clientes.map(c=><option key={c.id} value={c.nombre}>{c.nombre}</option>)}
+                  <option value="__libre">✏️ Escribir nombre...</option>
+                </select>
+              ) : (
+                <div style={{display:"flex",gap:8}}>
+                  <input className="form-input" placeholder="Nombre del cliente" value={form.clienteLibre} onChange={e=>setForm({...form,clienteLibre:e.target.value})} autoFocus />
+                  <button className="btn btn-ghost btn-sm" onClick={()=>setForm({...form,usarNombreLibre:false,clienteLibre:""})}>↩</button>
+                </div>
+              )}
             </div>
             <div className="form-group">
               <label className="form-label">Detalle</label>
@@ -430,7 +453,7 @@ function Ventas({ ventas, setVentas, clientes }) {
             </div>
             <div className="drawer-actions">
               <button className="btn btn-ghost" onClick={()=>setDrawer(false)}>Cancelar</button>
-              <button className="btn btn-accent" onClick={guardar}>Guardar venta</button>
+              <button className="btn btn-accent" onClick={guardar}>{editItem ? "Guardar cambios" : "Guardar venta"}</button>
             </div>
           </div>
         </div>
@@ -691,6 +714,7 @@ function Stock({ stock, setStock }) {
 // ══════════════════════════════════════════════════════════════════════════════
 function Clientes({ clientes, setClientes, ventas, pedidos }) {
   const [drawer, setDrawer] = useState(false);
+  const [editItem, setEditItem] = useState(null);
   const [search, setSearch] = useState("");
   const [form, setForm] = useState({ nombre:"", telefono:"", email:"" });
 
@@ -699,12 +723,16 @@ function Clientes({ clientes, setClientes, ventas, pedidos }) {
     c.telefono.includes(search) || c.email.toLowerCase().includes(search.toLowerCase())
   );
 
+  const openNew = () => { setEditItem(null); setForm({ nombre:"", telefono:"", email:"" }); setDrawer(true); };
+  const openEdit = (c) => { setEditItem(c); setForm({ nombre:c.nombre, telefono:c.telefono, email:c.email }); setDrawer(true); };
+
   const guardar = () => {
     if (!form.nombre) return;
-    setClientes([...clientes, {...form, id:Date.now()}]);
-    setForm({ nombre:"", telefono:"", email:"" });
+    if (editItem) setClientes(clientes.map(c => c.id===editItem.id ? {...c, ...form} : c));
+    else setClientes([...clientes, {...form, id:Date.now()}]);
     setDrawer(false);
   };
+  const eliminar = (id) => { if(confirm("¿Eliminar este cliente?")) setClientes(clientes.filter(c=>c.id!==id)); };
 
   const getClienteStats = (nombre) => ({
     pedidos: pedidos.filter(p=>p.cliente===nombre).length,
@@ -741,6 +769,10 @@ function Clientes({ clientes, setClientes, ventas, pedidos }) {
                 <div className="li-right">
                   <span className="badge badge-blue">{stats.pedidos} ped.</span>
                   <div className="li-date" style={{color:"var(--green)",marginTop:4}}>{formatCLP(stats.ventas)}</div>
+                  <div style={{display:"flex",gap:4,marginTop:6,justifyContent:"flex-end"}}>
+                    <button className="btn btn-sm btn-ghost" style={{padding:"3px 8px",fontSize:"0.7rem"}} onClick={()=>openEdit(c)}>✏️</button>
+                    <button className="btn btn-sm" style={{background:"rgba(255,92,58,0.1)",color:"var(--red)",border:"none",cursor:"pointer",borderRadius:6,padding:"3px 8px",fontSize:"0.7rem"}} onClick={()=>eliminar(c.id)}>✕</button>
+                  </div>
                 </div>
               </div>
             );
@@ -748,13 +780,13 @@ function Clientes({ clientes, setClientes, ventas, pedidos }) {
         }
       </div>
 
-      <button className="fab" onClick={()=>setDrawer(true)}>＋</button>
+      <button className="fab" onClick={openNew}>＋</button>
 
       {drawer && (
         <div className="overlay" onClick={e=>e.target===e.currentTarget&&setDrawer(false)}>
           <div className="drawer">
             <div className="drawer-handle"/>
-            <div className="drawer-title">Nuevo cliente</div>
+            <div className="drawer-title">{editItem ? "Editar cliente" : "Nuevo cliente"}</div>
             <div className="form-group">
               <label className="form-label">Nombre completo</label>
               <input className="form-input" placeholder="Nombre del cliente" value={form.nombre} onChange={e=>setForm({...form,nombre:e.target.value})} />
@@ -769,7 +801,7 @@ function Clientes({ clientes, setClientes, ventas, pedidos }) {
             </div>
             <div className="drawer-actions">
               <button className="btn btn-ghost" onClick={()=>setDrawer(false)}>Cancelar</button>
-              <button className="btn btn-accent" onClick={guardar}>Guardar cliente</button>
+              <button className="btn btn-accent" onClick={guardar}>{editItem ? "Guardar cambios" : "Guardar cliente"}</button>
             </div>
           </div>
         </div>
@@ -783,17 +815,23 @@ function Clientes({ clientes, setClientes, ventas, pedidos }) {
 // ══════════════════════════════════════════════════════════════════════════════
 function Gastos({ gastos, setGastos }) {
   const [drawer, setDrawer] = useState(false);
+  const [editItem, setEditItem] = useState(null);
   const [form, setForm] = useState({ descripcion:"", categoria:"Insumos", monto:"", fecha:today() });
 
   const total = gastos.reduce((s,g)=>s+g.monto,0);
   const porCat = CAT_GASTO.map(c=>({cat:c, total:gastos.filter(g=>g.categoria===c).reduce((s,g)=>s+g.monto,0)})).filter(x=>x.total>0);
 
+  const openNew = () => { setEditItem(null); setForm({ descripcion:"", categoria:"Insumos", monto:"", fecha:today() }); setDrawer(true); };
+  const openEdit = (g) => { setEditItem(g); setForm({...g}); setDrawer(true); };
+
   const guardar = () => {
     if (!form.descripcion||!form.monto) return;
-    setGastos([{ ...form, id:Date.now(), monto:Number(form.monto) }, ...gastos]);
-    setForm({ descripcion:"", categoria:"Insumos", monto:"", fecha:today() });
+    const item = { ...form, monto:Number(form.monto) };
+    if (editItem) setGastos(gastos.map(g => g.id===editItem.id ? {...item, id:editItem.id} : g));
+    else setGastos([{ ...item, id:Date.now() }, ...gastos]);
     setDrawer(false);
   };
+  const eliminar = (id) => { if(confirm("¿Eliminar este gasto?")) setGastos(gastos.filter(g=>g.id!==id)); };
 
   const COLORS = ["#ff5c3a","#ffb547","#3affd1","#5c9eff","#a855f7","#f97316"];
 
@@ -844,19 +882,23 @@ function Gastos({ gastos, setGastos }) {
               <div className="li-right">
                 <div className="li-amount red">-{formatCLP(g.monto)}</div>
                 <div className="li-date">{g.fecha}</div>
+                <div style={{display:"flex",gap:4,marginTop:4,justifyContent:"flex-end"}}>
+                  <button className="btn btn-sm btn-ghost" style={{padding:"3px 8px",fontSize:"0.7rem"}} onClick={()=>openEdit(g)}>✏️</button>
+                  <button className="btn btn-sm" style={{background:"rgba(255,92,58,0.1)",color:"var(--red)",border:"none",cursor:"pointer",borderRadius:6,padding:"3px 8px",fontSize:"0.7rem"}} onClick={()=>eliminar(g.id)}>✕</button>
+                </div>
               </div>
             </div>
           ))
         }
       </div>
 
-      <button className="fab" onClick={()=>setDrawer(true)}>＋</button>
+      <button className="fab" onClick={openNew}>＋</button>
 
       {drawer && (
         <div className="overlay" onClick={e=>e.target===e.currentTarget&&setDrawer(false)}>
           <div className="drawer">
             <div className="drawer-handle"/>
-            <div className="drawer-title">Nuevo gasto</div>
+            <div className="drawer-title">{editItem ? "Editar gasto" : "Nuevo gasto"}</div>
             <div className="form-group">
               <label className="form-label">Descripción</label>
               <input className="form-input" placeholder="Ej: Tinta DTF 1L" value={form.descripcion} onChange={e=>setForm({...form,descripcion:e.target.value})} />
@@ -879,7 +921,7 @@ function Gastos({ gastos, setGastos }) {
             </div>
             <div className="drawer-actions">
               <button className="btn btn-ghost" onClick={()=>setDrawer(false)}>Cancelar</button>
-              <button className="btn btn-accent" onClick={guardar}>Guardar gasto</button>
+              <button className="btn btn-accent" onClick={guardar}>{editItem ? "Guardar cambios" : "Guardar gasto"}</button>
             </div>
           </div>
         </div>
@@ -1106,14 +1148,27 @@ const NAV_ITEMS = [
 
 const FECHA_HOY = new Date().toLocaleDateString("es-CL", { weekday:"short", day:"numeric", month:"short" });
 
+function useLocalState(key, init) {
+  const [val, setVal] = useState(() => {
+    try {
+      const stored = localStorage.getItem(key);
+      return stored ? JSON.parse(stored) : init;
+    } catch { return init; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+  }, [key, val]);
+  return [val, setVal];
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
-  const [ventas, setVentas] = useState(INIT_VENTAS);
-  const [pedidos, setPedidos] = useState(INIT_PEDIDOS);
-  const [stock, setStock] = useState(INIT_STOCK);
-  const [clientes, setClientes] = useState(INIT_CLIENTES);
-  const [gastos, setGastos] = useState(INIT_GASTOS);
-  const [cotizaciones, setCotizaciones] = useState(INIT_COTIZACIONES);
+  const [ventas, setVentas] = useLocalState("ilust_ventas", INIT_VENTAS);
+  const [pedidos, setPedidos] = useLocalState("ilust_pedidos", INIT_PEDIDOS);
+  const [stock, setStock] = useLocalState("ilust_stock", INIT_STOCK);
+  const [clientes, setClientes] = useLocalState("ilust_clientes", INIT_CLIENTES);
+  const [gastos, setGastos] = useLocalState("ilust_gastos", INIT_GASTOS);
+  const [cotizaciones, setCotizaciones] = useLocalState("ilust_cotizaciones", INIT_COTIZACIONES);
 
   return (
     <>
