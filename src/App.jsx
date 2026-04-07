@@ -332,29 +332,83 @@ function Dashboard({ ventas, pedidos, stock, gastos, clientes, cotizaciones }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // VENTAS
 // ══════════════════════════════════════════════════════════════════════════════
-const FORM_VENTA_EMPTY = { cliente:"", clienteLibre:"", usarNombreLibre:false, detalle:"", monto:"", fecha:today(), metodo:"Transferencia" };
-function Ventas({ ventas, setVentas, clientes }) {
+const FORM_VENTA_EMPTY = { cliente:"", clienteLibre:"", usarNombreLibre:false, detalle:"", monto:"", fecha:today(), metodo:"Transferencia", items:[] };
+// items = [{ stockId, nombre, cantidad, precioUnit }]
+
+function Ventas({ ventas, setVentas, clientes, stock, setStock }) {
   const [drawer, setDrawer] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [search, setSearch] = useState("");
   const [form, setForm] = useState(FORM_VENTA_EMPTY);
+  // producto en curso para agregar
+  const [prodSel, setProdSel] = useState(""); // id del stock o "__libre"
+  const [prodLibre, setProdLibre] = useState("");
+  const [prodCant, setProdCant] = useState(1);
+  const [prodPrecio, setProdPrecio] = useState("");
 
   const filtered = ventas.filter(v => v.cliente.toLowerCase().includes(search.toLowerCase()) || v.detalle.toLowerCase().includes(search.toLowerCase()));
   const total = filtered.reduce((s,v)=>s+v.monto,0);
 
-  const openNew = () => { setEditItem(null); setForm(FORM_VENTA_EMPTY); setDrawer(true); };
-  const openEdit = (v) => { setEditItem(v); setForm({ ...v, clienteLibre:"", usarNombreLibre:false }); setDrawer(true); };
+  const openNew = () => { setEditItem(null); setForm(FORM_VENTA_EMPTY); resetProd(); setDrawer(true); };
+  const openEdit = (v) => { setEditItem(v); setForm({ ...v, clienteLibre:"", usarNombreLibre:false, items: v.items||[] }); resetProd(); setDrawer(true); };
+  const resetProd = () => { setProdSel(""); setProdLibre(""); setProdCant(1); setProdPrecio(""); };
+
+  // Cuando selecciona un producto del stock, autocompleta precio
+  const onSelectProd = (val) => {
+    setProdSel(val);
+    if (val && val !== "__libre") {
+      const s = stock.find(s => s.id === Number(val));
+      if (s) setProdPrecio(s.costo || "");
+    } else {
+      setProdPrecio("");
+    }
+  };
+
+  const agregarItem = () => {
+    const nombre = prodSel === "__libre" ? prodLibre : (stock.find(s=>s.id===Number(prodSel))?.producto || "");
+    if (!nombre || !prodCant || prodCant < 1) return;
+    const newItem = {
+      stockId: prodSel === "__libre" ? null : Number(prodSel),
+      nombre,
+      cantidad: Number(prodCant),
+      precioUnit: Number(prodPrecio) || 0,
+    };
+    const nuevosItems = [...form.items, newItem];
+    const nuevoTotal = nuevosItems.reduce((s,i)=>s+(i.precioUnit*i.cantidad),0);
+    const nuevoDetalle = nuevosItems.map(i=>`${i.nombre} x${i.cantidad}`).join(" + ");
+    setForm(f => ({ ...f, items: nuevosItems, monto: nuevoTotal || f.monto, detalle: nuevoDetalle }));
+    resetProd();
+  };
+
+  const quitarItem = (idx) => {
+    const nuevosItems = form.items.filter((_,i)=>i!==idx);
+    const nuevoTotal = nuevosItems.reduce((s,i)=>s+(i.precioUnit*i.cantidad),0);
+    const nuevoDetalle = nuevosItems.map(i=>`${i.nombre} x${i.cantidad}`).join(" + ");
+    setForm(f => ({ ...f, items: nuevosItems, monto: nuevoTotal || f.monto, detalle: nuevoDetalle }));
+  };
 
   const guardar = () => {
     const nombreFinal = form.usarNombreLibre ? form.clienteLibre : form.cliente;
     if (!nombreFinal || !form.monto) return;
     const item = { ...form, cliente: nombreFinal, monto: Number(form.monto) };
     delete item.clienteLibre; delete item.usarNombreLibre;
-    if (editItem) setVentas(ventas.map(v => v.id===editItem.id ? {...item, id:editItem.id} : v));
-    else setVentas([{ ...item, id:Date.now() }, ...ventas]);
+    if (editItem) {
+      setVentas(ventas.map(v => v.id===editItem.id ? {...item, id:editItem.id} : v));
+    } else {
+      // Descontar del stock solo al crear (no al editar)
+      form.items.forEach(it => {
+        if (it.stockId) {
+          setStock(prev => prev.map(s => s.id===it.stockId ? {...s, cantidad: Math.max(0, s.cantidad - it.cantidad)} : s));
+        }
+      });
+      setVentas([{ ...item, id:Date.now() }, ...ventas]);
+    }
     setDrawer(false);
   };
+
   const eliminar = (id) => { if(confirm("¿Eliminar esta venta?")) setVentas(ventas.filter(v=>v.id!==id)); };
+
+  const prodSeleccionado = prodSel && prodSel !== "__libre" ? stock.find(s=>s.id===Number(prodSel)) : null;
 
   return (
     <div>
@@ -413,6 +467,8 @@ function Ventas({ ventas, setVentas, clientes }) {
           <div className="drawer">
             <div className="drawer-handle"/>
             <div className="drawer-title">{editItem ? "Editar venta" : "Nueva venta"}</div>
+
+            {/* Cliente */}
             <div className="form-group">
               <label className="form-label">Cliente</label>
               {!form.usarNombreLibre ? (
@@ -431,13 +487,67 @@ function Ventas({ ventas, setVentas, clientes }) {
                 </div>
               )}
             </div>
+
+            {/* Agregar productos desde stock */}
             <div className="form-group">
-              <label className="form-label">Detalle</label>
-              <input className="form-input" placeholder="Ej: Polera x3 + taza x1" value={form.detalle} onChange={e=>setForm({...form,detalle:e.target.value})} />
+              <label className="form-label">Agregar productos</label>
+              <select className="form-select" value={prodSel} onChange={e=>onSelectProd(e.target.value)} style={{marginBottom:8}}>
+                <option value="">Seleccionar producto del stock...</option>
+                {stock.map(s=><option key={s.id} value={s.id}>{s.producto} — stock: {s.cantidad}</option>)}
+                <option value="__libre">✏️ Escribir producto manualmente...</option>
+              </select>
+              {prodSel==="__libre" && (
+                <input className="form-input" placeholder="Nombre del producto" value={prodLibre} onChange={e=>setProdLibre(e.target.value)} style={{marginBottom:8}} />
+              )}
+              {prodSel && (
+                <>
+                  {prodSeleccionado && prodSeleccionado.cantidad === 0 && (
+                    <div style={{color:"var(--red)",fontSize:"0.75rem",marginBottom:6}}>⚠️ Este producto no tiene stock disponible</div>
+                  )}
+                  <div className="form-row" style={{marginBottom:8}}>
+                    <div className="form-group" style={{marginBottom:0}}>
+                      <label className="form-label">Cantidad</label>
+                      <input className="form-input" type="number" min="1" max={prodSeleccionado?.cantidad || 9999} placeholder="1" value={prodCant} onChange={e=>setProdCant(e.target.value)} />
+                    </div>
+                    <div className="form-group" style={{marginBottom:0}}>
+                      <label className="form-label">Precio unit. ($)</label>
+                      <input className="form-input" type="number" placeholder="0" value={prodPrecio} onChange={e=>setProdPrecio(e.target.value)} />
+                    </div>
+                  </div>
+                  <button className="btn btn-ghost btn-sm" style={{width:"100%",marginBottom:4}} onClick={agregarItem}>＋ Agregar al detalle</button>
+                </>
+              )}
             </div>
+
+            {/* Items agregados */}
+            {form.items.length > 0 && (
+              <div style={{background:"var(--bg)",borderRadius:8,padding:"8px 12px",marginBottom:14}}>
+                <div style={{fontSize:"0.72rem",color:"var(--muted)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.5px"}}>Productos en esta venta</div>
+                {form.items.map((it,idx)=>(
+                  <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:"1px solid var(--border)"}}>
+                    <span style={{fontSize:"0.82rem"}}>{it.nombre} x{it.cantidad}</span>
+                    <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                      <span style={{fontSize:"0.82rem",color:"var(--green)",fontFamily:"var(--mono)"}}>{formatCLP(it.precioUnit*it.cantidad)}</span>
+                      <button onClick={()=>quitarItem(idx)} style={{background:"none",border:"none",color:"var(--red)",cursor:"pointer",fontSize:"0.9rem"}}>✕</button>
+                    </div>
+                  </div>
+                ))}
+                <div style={{display:"flex",justifyContent:"space-between",paddingTop:6,fontSize:"0.85rem",fontWeight:700}}>
+                  <span>Total automático</span>
+                  <span style={{color:"var(--green)",fontFamily:"var(--mono)"}}>{formatCLP(form.items.reduce((s,i)=>s+(i.precioUnit*i.cantidad),0))}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Detalle manual / resumen */}
+            <div className="form-group">
+              <label className="form-label">Detalle / descripción</label>
+              <input className="form-input" placeholder="Se llena automático o escribe a mano" value={form.detalle} onChange={e=>setForm({...form,detalle:e.target.value})} />
+            </div>
+
             <div className="form-row">
               <div className="form-group">
-                <label className="form-label">Monto ($)</label>
+                <label className="form-label">Monto total ($)</label>
                 <input className="form-input" type="number" placeholder="0" value={form.monto} onChange={e=>setForm({...form,monto:e.target.value})} />
               </div>
               <div className="form-group">
@@ -469,7 +579,7 @@ function Pedidos({ pedidos, setPedidos, clientes }) {
   const [drawer, setDrawer] = useState(false);
   const [search, setSearch] = useState("");
   const [filtroEstado, setFiltroEstado] = useState("Todos");
-  const [form, setForm] = useState({ cliente:"", detalle:"", total:"", estado:"Pendiente", fecha:today(), notas:"" });
+  const [form, setForm] = useState({ cliente:"", clienteLibre:"", usarNombreLibre:false, detalle:"", total:"", estado:"Pendiente", fecha:today(), notas:"" });
 
   const todos = ["Todos", ...ESTADOS_PEDIDO];
   let filtered = pedidos.filter(p =>
@@ -478,9 +588,12 @@ function Pedidos({ pedidos, setPedidos, clientes }) {
   );
 
   const guardar = () => {
-    if (!form.cliente||!form.detalle) return;
-    setPedidos([{ ...form, id:Date.now(), total:Number(form.total) }, ...pedidos]);
-    setForm({ cliente:"", detalle:"", total:"", estado:"Pendiente", fecha:today(), notas:"" });
+    const nombreFinal = form.usarNombreLibre ? form.clienteLibre : form.cliente;
+    if (!nombreFinal || !form.detalle) return;
+    const item = { ...form, cliente: nombreFinal, total:Number(form.total) };
+    delete item.clienteLibre; delete item.usarNombreLibre;
+    setPedidos([{ ...item, id:Date.now() }, ...pedidos]);
+    setForm({ cliente:"", clienteLibre:"", usarNombreLibre:false, detalle:"", total:"", estado:"Pendiente", fecha:today(), notas:"" });
     setDrawer(false);
   };
   const cambiarEstado = (id, estado) => setPedidos(pedidos.map(p=>p.id===id?{...p,estado}:p));
@@ -543,11 +656,21 @@ function Pedidos({ pedidos, setPedidos, clientes }) {
             <div className="drawer-title">Nuevo pedido</div>
             <div className="form-group">
               <label className="form-label">Cliente</label>
-              <select className="form-select" value={form.cliente} onChange={e=>setForm({...form,cliente:e.target.value})}>
-                <option value="">Seleccionar...</option>
-                {clientes.map(c=><option key={c.id}>{c.nombre}</option>)}
-                <option value="Otro">Otro</option>
-              </select>
+              {!form.usarNombreLibre ? (
+                <select className="form-select" value={form.cliente} onChange={e=>{
+                  if(e.target.value==="__libre") setForm({...form,usarNombreLibre:true,cliente:""});
+                  else setForm({...form,cliente:e.target.value});
+                }}>
+                  <option value="">Seleccionar...</option>
+                  {clientes.map(c=><option key={c.id} value={c.nombre}>{c.nombre}</option>)}
+                  <option value="__libre">✏️ Escribir nombre...</option>
+                </select>
+              ) : (
+                <div style={{display:"flex",gap:8}}>
+                  <input className="form-input" placeholder="Nombre del cliente" value={form.clienteLibre} onChange={e=>setForm({...form,clienteLibre:e.target.value})} autoFocus />
+                  <button className="btn btn-ghost btn-sm" onClick={()=>setForm({...form,usarNombreLibre:false,clienteLibre:""})}>↩</button>
+                </div>
+              )}
             </div>
             <div className="form-group">
               <label className="form-label">Detalle del pedido</label>
@@ -1181,7 +1304,7 @@ export default function App() {
 
         <div className="content">
           {tab==="dashboard"    && <Dashboard ventas={ventas} pedidos={pedidos} stock={stock} gastos={gastos} clientes={clientes} cotizaciones={cotizaciones}/>}
-          {tab==="ventas"       && <Ventas ventas={ventas} setVentas={setVentas} clientes={clientes}/>}
+          {tab==="ventas"       && <Ventas ventas={ventas} setVentas={setVentas} clientes={clientes} stock={stock} setStock={setStock}/>}
           {tab==="pedidos"      && <Pedidos pedidos={pedidos} setPedidos={setPedidos} clientes={clientes}/>}
           {tab==="stock"        && <Stock stock={stock} setStock={setStock}/>}
           {tab==="clientes"     && <Clientes clientes={clientes} setClientes={setClientes} ventas={ventas} pedidos={pedidos}/>}
