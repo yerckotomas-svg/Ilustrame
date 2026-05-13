@@ -437,28 +437,55 @@ function Ventas({ ventas, setVentas, clientes, stock, setStock }) {
         <input className="search-input" placeholder="Buscar venta..." value={search} onChange={e=>setSearch(e.target.value)} />
       </div>
 
-      <div className="card">
-        {filtered.length===0
-          ? <div className="empty"><div className="empty-icon">💰</div><div className="empty-text">Sin ventas registradas</div></div>
-          : filtered.map(v=>(
-            <div className="list-item" key={v.id}>
-              {liIcon("rgba(58,255,209,0.10)","💰")}
-              <div className="li-body">
-                <div className="li-title">{v.cliente}</div>
-                <div className="li-sub">{v.detalle} · {v.metodo}</div>
+      {/* Agrupado por mes */}
+      {(() => {
+        if (filtered.length === 0) return (
+          <div className="card"><div className="empty"><div className="empty-icon">💰</div><div className="empty-text">Sin ventas registradas</div></div></div>
+        );
+        // Agrupar por año-mes
+        const grupos = {};
+        [...filtered].sort((a,b)=>b.fecha.localeCompare(a.fecha)).forEach(v => {
+          const [y,m] = v.fecha.split("-");
+          const key = `${y}-${m}`;
+          if (!grupos[key]) grupos[key] = [];
+          grupos[key].push(v);
+        });
+        const mesesNombre = ["","Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+        return Object.entries(grupos).map(([key, items]) => {
+          const [y, m] = key.split("-");
+          const totalMes = items.reduce((s,v)=>s+v.monto,0);
+          return (
+            <div key={key} style={{marginBottom:14}}>
+              {/* Cabecera del mes */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,padding:"0 2px"}}>
+                <span style={{fontSize:"0.78rem",fontWeight:700,color:"var(--muted)",textTransform:"uppercase",letterSpacing:"0.8px"}}>
+                  {mesesNombre[Number(m)]} {y}
+                </span>
+                <span style={{fontFamily:"var(--mono)",fontSize:"0.82rem",fontWeight:700,color:"var(--green)"}}>{formatCLP(totalMes)}</span>
               </div>
-              <div className="li-right">
-                <div className="li-amount green">{formatCLP(v.monto)}</div>
-                <div className="li-date">{v.fecha}</div>
-                <div style={{display:"flex",gap:4,marginTop:4,justifyContent:"flex-end"}}>
-                  <button className="btn btn-sm btn-ghost" style={{padding:"3px 8px",fontSize:"0.7rem"}} onClick={()=>openEdit(v)}>✏️</button>
-                  <button className="btn btn-sm" style={{background:"rgba(255,92,58,0.1)",color:"var(--red)",border:"none",cursor:"pointer",borderRadius:6,padding:"3px 8px",fontSize:"0.7rem"}} onClick={()=>eliminar(v.id)}>✕</button>
-                </div>
+              <div className="card">
+                {items.map(v=>(
+                  <div className="list-item" key={v.id}>
+                    {liIcon("rgba(58,255,209,0.10)","💰")}
+                    <div className="li-body">
+                      <div className="li-title">{v.cliente}</div>
+                      <div className="li-sub">{v.detalle} · {v.metodo}</div>
+                    </div>
+                    <div className="li-right">
+                      <div className="li-amount green">{formatCLP(v.monto)}</div>
+                      <div className="li-date">{v.fecha}</div>
+                      <div style={{display:"flex",gap:4,marginTop:4,justifyContent:"flex-end"}}>
+                        <button className="btn btn-sm btn-ghost" style={{padding:"3px 8px",fontSize:"0.7rem"}} onClick={()=>openEdit(v)}>✏️</button>
+                        <button className="btn btn-sm" style={{background:"rgba(255,92,58,0.1)",color:"var(--red)",border:"none",cursor:"pointer",borderRadius:6,padding:"3px 8px",fontSize:"0.7rem"}} onClick={()=>eliminar(v.id)}>✕</button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-          ))
-        }
-      </div>
+          );
+        });
+      })()}
 
       <button className="fab" onClick={openNew}>＋</button>
 
@@ -575,11 +602,14 @@ function Ventas({ ventas, setVentas, clientes, stock, setStock }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // PEDIDOS
 // ══════════════════════════════════════════════════════════════════════════════
-function Pedidos({ pedidos, setPedidos, clientes }) {
+function Pedidos({ pedidos, setPedidos, clientes, setVentas }) {
   const [drawer, setDrawer] = useState(false);
   const [search, setSearch] = useState("");
   const [filtroEstado, setFiltroEstado] = useState("Todos");
   const [form, setForm] = useState({ cliente:"", clienteLibre:"", usarNombreLibre:false, detalle:"", total:"", estado:"Pendiente", fecha:today(), notas:"" });
+  const [pagoModal, setPagoModal] = useState(null); // pedido pendiente de confirmar pago
+  const [pagoFecha, setPagoFecha] = useState(today());
+  const [pagoMetodo, setPagoMetodo] = useState("Transferencia");
 
   const todos = ["Todos", ...ESTADOS_PEDIDO];
   let filtered = pedidos.filter(p =>
@@ -598,6 +628,28 @@ function Pedidos({ pedidos, setPedidos, clientes }) {
   };
   const cambiarEstado = (id, estado) => setPedidos(pedidos.map(p=>p.id===id?{...p,estado}:p));
   const eliminar = (id) => setPedidos(pedidos.filter(p=>p.id!==id));
+
+  const abrirPago = (p) => {
+    if (p.pagado) return;
+    setPagoFecha(today());
+    setPagoMetodo("Transferencia");
+    setPagoModal(p);
+  };
+
+  const confirmarPago = () => {
+    if (!pagoModal) return;
+    setVentas(prev => [{
+      id: Date.now(),
+      cliente: pagoModal.cliente,
+      detalle: pagoModal.detalle,
+      monto: pagoModal.total,
+      fecha: pagoFecha,
+      metodo: pagoMetodo,
+      items: [],
+    }, ...prev]);
+    setPedidos(prev => prev.map(x => x.id===pagoModal.id ? {...x, pagado:true, estado:"Entregado"} : x));
+    setPagoModal(null);
+  };
 
   const stateColor = { "Pendiente":"var(--muted)","En proceso":"var(--yellow)","Listo para entrega":"var(--blue)","Entregado":"var(--green)","Cancelado":"var(--red)" };
 
@@ -640,7 +692,18 @@ function Pedidos({ pedidos, setPedidos, clientes }) {
               <div className="li-right">
                 <div className="li-amount">{formatCLP(p.total)}</div>
                 <div className="li-date">{p.fecha}</div>
-                <button className="btn btn-sm" style={{marginTop:4,background:"rgba(255,92,58,0.1)",color:"var(--red)",border:"none",cursor:"pointer",borderRadius:6,padding:"3px 8px",fontSize:"0.7rem"}} onClick={()=>eliminar(p.id)}>✕</button>
+                <div style={{display:"flex",gap:4,marginTop:4,flexDirection:"column",alignItems:"flex-end"}}>
+                  {!p.pagado
+                    ? <button
+                        className="btn btn-sm"
+                        style={{background:"rgba(58,255,209,0.12)",color:"var(--green)",border:"1px solid rgba(58,255,209,0.25)",cursor:"pointer",borderRadius:6,padding:"4px 10px",fontSize:"0.72rem",fontWeight:700}}
+                        onClick={()=>abrirPago(p)}>
+                        💰 Pagado
+                      </button>
+                    : <span className="badge badge-green">✓ Pagado</span>
+                  }
+                  <button className="btn btn-sm" style={{background:"rgba(255,92,58,0.1)",color:"var(--red)",border:"none",cursor:"pointer",borderRadius:6,padding:"3px 8px",fontSize:"0.7rem"}} onClick={()=>eliminar(p.id)}>✕</button>
+                </div>
               </div>
             </div>
           ))
@@ -648,6 +711,35 @@ function Pedidos({ pedidos, setPedidos, clientes }) {
       </div>
 
       <button className="fab" onClick={()=>setDrawer(true)}>＋</button>
+
+      {/* Modal confirmar pago */}
+      {pagoModal && (
+        <div className="overlay" onClick={e=>e.target===e.currentTarget&&setPagoModal(null)}>
+          <div className="drawer">
+            <div className="drawer-handle"/>
+            <div className="drawer-title">Confirmar pago 💰</div>
+            <div style={{background:"var(--bg)",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:"0.85rem"}}>
+              <div style={{fontWeight:700,marginBottom:4}}>{pagoModal.cliente}</div>
+              <div style={{color:"var(--muted)",marginBottom:4}}>{pagoModal.detalle}</div>
+              <div style={{fontFamily:"var(--mono)",color:"var(--green)",fontWeight:700}}>{formatCLP(pagoModal.total)}</div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Fecha de pago</label>
+              <input className="form-input" type="date" value={pagoFecha} onChange={e=>setPagoFecha(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Método de pago</label>
+              <select className="form-select" value={pagoMetodo} onChange={e=>setPagoMetodo(e.target.value)}>
+                {METODOS.map(m=><option key={m}>{m}</option>)}
+              </select>
+            </div>
+            <div className="drawer-actions">
+              <button className="btn btn-ghost" onClick={()=>setPagoModal(null)}>Cancelar</button>
+              <button className="btn btn-accent" onClick={confirmarPago}>Registrar pago</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {drawer && (
         <div className="overlay" onClick={e=>e.target===e.currentTarget&&setDrawer(false)}>
@@ -1160,7 +1252,6 @@ function Estadisticas({ ventas, gastos, pedidos }) {
   const utilidad = totalVentas - totalGastos;
   const margen = totalVentas > 0 ? Math.round((utilidad/totalVentas)*100) : 0;
 
-  // Ventas por mes
   const meses = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
   const ventasPorMes = meses.map((m,i)=>{
     const num = String(i+1).padStart(2,"0");
@@ -1171,11 +1262,8 @@ function Estadisticas({ ventas, gastos, pedidos }) {
     };
   }).filter(x=>x.ventas>0||x.gastos>0);
 
-  // Métodos de pago
   const metodos = METODOS.map(m=>({ name:m, value:ventas.filter(v=>v.metodo===m).reduce((s,v)=>s+v.monto,0) })).filter(x=>x.value>0);
   const COLORS = ["#ff5c3a","#ffb547","#3affd1","#5c9eff","#a855f7"];
-
-  // Estado pedidos
   const estadosPedidos = ESTADOS_PEDIDO.map(e=>({ name:e, value:pedidos.filter(p=>p.estado===e).length })).filter(x=>x.value>0);
 
   return (
@@ -1185,39 +1273,44 @@ function Estadisticas({ ventas, gastos, pedidos }) {
         <div className="page-sub">Análisis de tu negocio</div>
       </div>
 
-      <div className="chips">
-        <div className="chip" style={{"--chip-color":"var(--green)"}}>
-          <div className="chip-label">Ventas</div>
-          <div className="chip-value sm">{formatCLP(totalVentas)}</div>
-        </div>
-        <div className="chip" style={{"--chip-color":"var(--red)"}}>
-          <div className="chip-label">Gastos</div>
-          <div className="chip-value sm">{formatCLP(totalGastos)}</div>
-        </div>
-        <div className="chip" style={{"--chip-color": utilidad>=0?"var(--green)":"var(--red)"}}>
-          <div className="chip-label">Utilidad</div>
-          <div className="chip-value sm" style={{color:utilidad>=0?"var(--green)":"var(--red)"}}>{formatCLP(utilidad)}</div>
-        </div>
-        <div className="chip" style={{"--chip-color":"var(--yellow)"}}>
-          <div className="chip-label">Margen</div>
-          <div className="chip-value" style={{color:margen>=0?"var(--green)":"var(--red)"}}>{margen}%</div>
+      {/* Resumen en lista vertical para evitar overflow */}
+      <div className="card" style={{marginBottom:14}}>
+        <div className="card-head"><div className="card-title">Resumen financiero</div></div>
+        <div style={{padding:"4px 16px 12px"}}>
+          {[
+            {label:"Ventas totales", val:formatCLP(totalVentas), color:"var(--green)"},
+            {label:"Gastos totales", val:formatCLP(totalGastos), color:"var(--red)"},
+            {label:"Utilidad neta", val:formatCLP(utilidad), color:utilidad>=0?"var(--green)":"var(--red)"},
+            {label:"Margen", val:`${margen}%`, color:margen>=0?"var(--green)":"var(--red)"},
+            {label:"Nº de ventas", val:ventas.length, color:"var(--text)"},
+          ].map(r=>(
+            <div className="stat-row" key={r.label}>
+              <span className="stat-key">{r.label}</span>
+              <span className="stat-val" style={{color:r.color}}>{r.val}</span>
+            </div>
+          ))}
         </div>
       </div>
 
       {ventasPorMes.length > 0 && (
         <div className="card" style={{marginBottom:14}}>
           <div className="card-head"><div className="card-title">Ventas vs Gastos por mes</div></div>
-          <div className="chart-wrap">
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={ventasPorMes} margin={{top:4,right:4,left:0,bottom:4}}>
+          {/* Scroll horizontal para el gráfico de barras */}
+          <div style={{overflowX:"auto",paddingBottom:4}}>
+            <div style={{minWidth: Math.max(300, ventasPorMes.length * 60)}}>
+              <BarChart width={Math.max(340, ventasPorMes.length*60)} height={180} data={ventasPorMes} margin={{top:8,right:12,left:0,bottom:4}}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis dataKey="mes" tick={{fill:"var(--muted)",fontSize:11}} axisLine={false} tickLine={false}/>
-                <YAxis tick={{fill:"var(--muted)",fontSize:10}} axisLine={false} tickLine={false} tickFormatter={v=>`$${(v/1000).toFixed(0)}k`}/>
+                <YAxis tick={{fill:"var(--muted)",fontSize:10}} axisLine={false} tickLine={false} tickFormatter={v=>`$${(v/1000).toFixed(0)}k`} width={38}/>
                 <Tooltip formatter={(v)=>formatCLP(v)} contentStyle={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:8,color:"var(--text)",fontSize:"0.8rem"}}/>
                 <Bar dataKey="ventas" fill="var(--green)" radius={[4,4,0,0]} name="Ventas"/>
                 <Bar dataKey="gastos" fill="var(--red)" radius={[4,4,0,0]} name="Gastos"/>
               </BarChart>
-            </ResponsiveContainer>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:16,padding:"6px 16px 12px",fontSize:"0.75rem"}}>
+            <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:10,height:10,borderRadius:2,background:"var(--green)",display:"inline-block"}}/>Ventas</span>
+            <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:10,height:10,borderRadius:2,background:"var(--red)",display:"inline-block"}}/>Gastos</span>
           </div>
         </div>
       )}
@@ -1225,23 +1318,24 @@ function Estadisticas({ ventas, gastos, pedidos }) {
       {metodos.length > 0 && (
         <div className="card" style={{marginBottom:14}}>
           <div className="card-head"><div className="card-title">Métodos de pago</div></div>
-          <div className="chart-wrap">
-            <ResponsiveContainer width="100%" height={160}>
-              <PieChart>
-                <Pie data={metodos} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={60} label={({name})=>name}>
-                  {metodos.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}
-                </Pie>
-                <Tooltip formatter={(v)=>formatCLP(v)} contentStyle={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:8,color:"var(--text)",fontSize:"0.8rem"}}/>
-              </PieChart>
-            </ResponsiveContainer>
+          <div style={{padding:"4px 16px 12px"}}>
+            {metodos.map((m,i)=>(
+              <div className="stat-row" key={m.name}>
+                <span style={{display:"flex",alignItems:"center",gap:8,fontSize:"0.82rem"}}>
+                  <span style={{width:10,height:10,borderRadius:"50%",background:COLORS[i%COLORS.length],display:"inline-block",flexShrink:0}}/>
+                  {m.name}
+                </span>
+                <span className="stat-val" style={{color:COLORS[i%COLORS.length]}}>{formatCLP(m.value)}</span>
+              </div>
+            ))}
           </div>
         </div>
       )}
 
       {estadosPedidos.length > 0 && (
-        <div className="card">
+        <div className="card" style={{marginBottom:14}}>
           <div className="card-head"><div className="card-title">Estado de pedidos</div></div>
-          <div style={{padding:"4px 16px 14px"}}>
+          <div style={{padding:"4px 16px 12px"}}>
             {estadosPedidos.map(e=>(
               <div className="stat-row" key={e.name}>
                 <span className="stat-key">{e.name}</span>
@@ -1305,7 +1399,7 @@ export default function App() {
         <div className="content">
           {tab==="dashboard"    && <Dashboard ventas={ventas} pedidos={pedidos} stock={stock} gastos={gastos} clientes={clientes} cotizaciones={cotizaciones}/>}
           {tab==="ventas"       && <Ventas ventas={ventas} setVentas={setVentas} clientes={clientes} stock={stock} setStock={setStock}/>}
-          {tab==="pedidos"      && <Pedidos pedidos={pedidos} setPedidos={setPedidos} clientes={clientes}/>}
+          {tab==="pedidos"      && <Pedidos pedidos={pedidos} setPedidos={setPedidos} clientes={clientes} setVentas={setVentas}/>}
           {tab==="stock"        && <Stock stock={stock} setStock={setStock}/>}
           {tab==="clientes"     && <Clientes clientes={clientes} setClientes={setClientes} ventas={ventas} pedidos={pedidos}/>}
           {tab==="gastos"       && <Gastos gastos={gastos} setGastos={setGastos}/>}
